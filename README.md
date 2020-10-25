@@ -1,3 +1,3 @@
 # tinypage
 
-A tiny single page http server.
+A tiny single-page http server.
