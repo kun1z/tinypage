@@ -79,14 +79,7 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 
         if (!pid) // child
         {
-            errno = 0;
-            si res = close(sock);
-
-            if (errno || res == -1)
-            {
-                o("close error: %d (%s)\n", errno, inet_ntoa(addr->sin_addr));
-                exit(EXIT_FAILURE);
-            }
+            close(sock);
 
             o("client with IP %s connected\n", inet_ntoa(addr->sin_addr));
 
@@ -153,10 +146,8 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 
             exit(EXIT_SUCCESS);
         }
-        else // parent
-        {
-            close(client_sock);
-        }
+
+        close(client_sock);
     }
 }
 //----------------------------------------------------------------------------------------------------------------------
