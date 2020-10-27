@@ -112,7 +112,7 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
                     if (ENABLE_OUTPUT)
                     {
                         fwrite(buf, 1, len, stdout);
-                        fflush(stdout);
+                        o("\n");
                     }
 
                     if (!strncasecmp(buf, "get ", 4) && strncasecmp(buf, "get /favicon", 12))
