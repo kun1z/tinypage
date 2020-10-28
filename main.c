@@ -26,11 +26,12 @@ typedef   float          r32;   typedef   double        r64;
 //----------------------------------------------------------------------------------------------------------------------
 #define ENABLE_OUTPUT     1
 #define MAX_LISTEN      100
-#define BUFSIZE       65536
+#define BUFSIZE     1048576
 //----------------------------------------------------------------------------------------------------------------------
 void pump(struct sockaddr_in * const restrict, const si);          // network pump
 void * map_file(s8 const * const restrict, u64 * restrict const);  // utility
 void o(s8 const * const restrict, ... );                           // utility
+s8 * datetime(s8 * const restrict);                                // utility
 //----------------------------------------------------------------------------------------------------------------------
 void pump(struct sockaddr_in * const restrict addr, const si sock)
 {
@@ -54,7 +55,8 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 
     while (1)
     {
-        o("socket accepting\n");
+        s8 dtbuf[64];
+        o("%s > socket accepting\n", datetime(dtbuf));
 
         socklen_t socklen = sizeof(struct sockaddr_in);
 
@@ -63,7 +65,7 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 
         if (errno || client_sock == -1)
         {
-            o("accept error: %d (%s)\n", errno, inet_ntoa(addr->sin_addr));
+            o("%s > accept error: %d (%s)\n", datetime(dtbuf), errno, inet_ntoa(addr->sin_addr));
             continue;
         }
 
@@ -72,7 +74,7 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 
         if (errno || pid == -1)
         {
-            o("fork error: %d\n", errno);
+            o("%s > fork error: %d\n", datetime(dtbuf), errno);
             close(client_sock);
             continue;
         }
@@ -81,9 +83,9 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
         {
             close(sock);
 
-            o("client with IP %s connected\n", inet_ntoa(addr->sin_addr));
+            o("%s > client with IP %s connected\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
 
-            memset(buf, 0, 12);
+            memset(buf, 0, 16);
 
             errno = 0;
             const ssize_t len = recv(client_sock, buf, BUFSIZE, 0);
@@ -92,20 +94,20 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
             {
                 if (errno == EAGAIN || errno == EWOULDBLOCK)
                 {
-                    o("recv timeout: %s\n", inet_ntoa(addr->sin_addr));
+                    o("%s > recv timeout: %s\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
                 }
                 else
                 {
-                    o("recv error: %d (%s)\n", errno, inet_ntoa(addr->sin_addr));
+                    o("%s > recv error: %d (%s)\n", datetime(dtbuf), errno, inet_ntoa(addr->sin_addr));
                 }
             }
             else if (!len)
             {
-                o("orderly close: %s\n", inet_ntoa(addr->sin_addr));
+                o("%s > orderly close: %s\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
             }
             else
             {
-                o("recv %u bytes from %s\n", len, inet_ntoa(addr->sin_addr));
+                o("%s > recv %zu bytes from %s\n", datetime(dtbuf), len, inet_ntoa(addr->sin_addr));
 
                 if (len < 16384)
                 {
@@ -115,7 +117,7 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
                         o("\n");
                     }
 
-                    if (!strncasecmp(buf, "get ", 4) && strncasecmp(buf, "get /favicon", 12))
+                    if ((!strncasecmp(buf, "get ", 4) || !strncasecmp(buf, "post ", 5)) && strncasecmp(buf, "get /favicon.ico", 16))
                     {
                         o("valid request from %s\n", inet_ntoa(addr->sin_addr));
 
@@ -128,15 +130,15 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 
                         if (errno || sent == -1)
                         {
-                            o("send error: %d (%s)\n", errno, inet_ntoa(addr->sin_addr));
+                            o("%s > send error: %d (%s)\n", datetime(dtbuf), errno, inet_ntoa(addr->sin_addr));
                         }
                         else if (sent == packet_size)
                         {
-                            o("sent %d bytes to %s\n", sent, inet_ntoa(addr->sin_addr));
+                            o("sent %zu bytes to %s\n", sent, inet_ntoa(addr->sin_addr));
                         }
                         else
                         {
-                            o("unkown send error: %s\n", inet_ntoa(addr->sin_addr));
+                            o("%s > unkown send error: %s\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
                         }
                     }
                 }
@@ -153,7 +155,8 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 //----------------------------------------------------------------------------------------------------------------------
 si main(si argc, s8 ** argv)
 {
-    o("tinypage v1.0\n");
+    s8 dtbuf[64];
+    o("%s > tinypage v1.0\n", datetime(dtbuf));
 
     if (argc != 3)
     {
@@ -250,6 +253,16 @@ void o(s8 const * const restrict format, ... )
         va_end(t);
         fflush(stdout);
     }
+}
+//----------------------------------------------------------------------------------------------------------------------
+s8 * datetime(s8 * const restrict buf)
+{
+    struct tm l;
+    time_t t = time(0);
+    localtime_r(&t, &l);
+    asctime_r(&l, buf);
+    buf[strlen(buf) - 1] = 0;
+    return buf;
 }
 //----------------------------------------------------------------------------------------------------------------------
 void * map_file(s8 const * const restrict filename, u64 * const restrict filesize)
