@@ -4,13 +4,13 @@
 static_assert(CHAR_BIT == 8, "ERROR: This code requires [char] to be exactly 8 bits.");
 //----------------------------------------------------------------------------------------------------------------------
 #include <stdint.h>
-typedef   unsigned int    ui;   typedef   int            si;
-typedef   unsigned char   u8;   typedef   char           s8;
-typedef   uint16_t       u16;   typedef   int16_t       s16;
-typedef   uint32_t       u32;   typedef   int32_t       s32;
-typedef   uint64_t       u64;   typedef   int64_t       s64;
-typedef   __uint128_t   u128;   typedef   __int128_t   s128;
-typedef   float          r32;   typedef   double        r64;
+typedef   unsigned char   u8     ;   typedef   char         s8     ;
+typedef   uint16_t        u16    ;   typedef   int16_t      s16    ;
+typedef   uint32_t        u32    ;   typedef   int32_t      s32    ;
+typedef   uint64_t        u64    ;   typedef   int64_t      s64    ;
+typedef   __uint128_t     u128   ;   typedef   __int128_t   s128   ;
+typedef   unsigned int    ui     ;   typedef   int          si     ;
+typedef   float           r32    ;   typedef   double       r64    ;
 //----------------------------------------------------------------------------------------------------------------------
 #include <errno.h>
 #include <fcntl.h>
@@ -26,7 +26,7 @@ typedef   float          r32;   typedef   double        r64;
 //----------------------------------------------------------------------------------------------------------------------
 #define ENABLE_OUTPUT     1
 #define MAX_LISTEN      100
-#define BUFSIZE     1048576
+#define BUFSIZE       20480
 //----------------------------------------------------------------------------------------------------------------------
 void pump(struct sockaddr_in * const restrict, const si);          // network pump
 void * map_file(s8 const * const restrict, u64 * restrict const);  // utility
@@ -36,20 +36,49 @@ s8 * datetime(s8 * const restrict);                                // utility
 void pump(struct sockaddr_in * const restrict addr, const si sock)
 {
     errno = 0;
-    char * const buf = malloc(BUFSIZE);
+    s8 * const restrict buf = malloc(BUFSIZE);
 
     if (errno || !buf)
     {
-        o("memory could not be allocated!\n");
+        o("memory could not be allocated\n");
         exit(EXIT_FAILURE);
     }
 
     u64 filesize;
-    s8 const * const restrict webpage = map_file("page.htm", &filesize);
+    s8 * const restrict webpage = map_file("page.htm", &filesize);
 
     if (!filesize || !webpage)
     {
-        o("page.htm could not be found!\n");
+        o("page.htm could not be found\n");
+        exit(EXIT_FAILURE);
+    }
+    else if ((filesize + 256) > BUFSIZE)
+    {
+        o("page.htm is too large for BUFSIZE\n");
+        exit(EXIT_FAILURE);
+    }
+
+    const u64 header_length = sprintf(buf, "HTTP/1.1 200 OK\nServer: tinypage/1.0\nContent-Length: %"PRIu64"\nConnection: close\nContent-Type: text/html; charset=us-ascii\n\n", filesize);
+    const u64 packet_size = header_length + filesize;
+
+    errno = 0;
+    s8 * const restrict packet = malloc(packet_size);
+
+    if (errno || !packet)
+    {
+        o("memory could not be allocated\n");
+        exit(EXIT_FAILURE);
+    }
+
+    memcpy(packet, buf, header_length);
+    memcpy(&packet[header_length], webpage, filesize);
+
+    errno = 0;
+    const si res = munmap(webpage, filesize);
+
+    if (errno || res == -1)
+    {
+        o("memory could not be unmapped\n");
         exit(EXIT_FAILURE);
     }
 
@@ -109,37 +138,30 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
             {
                 o("%s > recv %zu bytes from %s\n", datetime(dtbuf), len, inet_ntoa(addr->sin_addr));
 
-                if (len < 16384)
+                if (ENABLE_OUTPUT)
                 {
-                    if (ENABLE_OUTPUT)
+                    fwrite(buf, 1, len, stdout);
+                    o("\n");
+                }
+
+                if ((!strncasecmp(buf, "get ", 4) && strncasecmp(buf, "get /favicon.ico", 16)) || !strncasecmp(buf, "post ", 5) || !strncasecmp(buf, "head ", 5))
+                {
+                    o("valid request from %s\n", inet_ntoa(addr->sin_addr));
+
+                    errno = 0;
+                    ssize_t sent = send(client_sock, packet, packet_size, 0);
+
+                    if (errno || sent == -1)
                     {
-                        fwrite(buf, 1, len, stdout);
-                        o("\n");
+                        o("%s > send error: %d (%s)\n", datetime(dtbuf), errno, inet_ntoa(addr->sin_addr));
                     }
-
-                    if ((!strncasecmp(buf, "get ", 4) || !strncasecmp(buf, "post ", 5)) && strncasecmp(buf, "get /favicon.ico", 16))
+                    else if (sent == packet_size)
                     {
-                        o("valid request from %s\n", inet_ntoa(addr->sin_addr));
-
-                        const u64 header_length = sprintf(buf, "HTTP/1.1 200 OK\nServer: tinypage/1.0\nContent-Length: %"PRIu64"\nConnection: close\nContent-Type: text/html; charset=us-ascii\n\n", filesize);
-                        memcpy(&buf[header_length], webpage, filesize);
-                        const u64 packet_size = header_length + filesize;
-
-                        errno = 0;
-                        ssize_t sent = send(client_sock, buf, packet_size, 0);
-
-                        if (errno || sent == -1)
-                        {
-                            o("%s > send error: %d (%s)\n", datetime(dtbuf), errno, inet_ntoa(addr->sin_addr));
-                        }
-                        else if (sent == packet_size)
-                        {
-                            o("sent %zu bytes to %s\n", sent, inet_ntoa(addr->sin_addr));
-                        }
-                        else
-                        {
-                            o("%s > unkown send error: %s\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
-                        }
+                        o("sent %zu bytes to %s\n", sent, inet_ntoa(addr->sin_addr));
+                    }
+                    else
+                    {
+                        o("%s > unkown send error: %s\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
                     }
                 }
             }
@@ -158,9 +180,10 @@ si main(si argc, s8 ** argv)
     s8 dtbuf[64];
     o("%s > tinypage v1.0\n", datetime(dtbuf));
 
-    if (argc != 3)
+    if (argc != 4)
     {
-        o("example: %s 127.0.0.1 80\n", argv[0]);
+        o("%s <local bind ip> <local port> <packet count start#>\n", argv[0]);
+        o("example: %s 127.0.0.1 80 1000 &>> httpout.txt\n", argv[0]);
         return EXIT_FAILURE;
     }
 
@@ -258,7 +281,7 @@ void o(s8 const * const restrict format, ... )
 s8 * datetime(s8 * const restrict buf)
 {
     struct tm l;
-    time_t t = time(0);
+    const time_t t = time(0);
     localtime_r(&t, &l);
     asctime_r(&l, buf);
     buf[strlen(buf) - 1] = 0;
@@ -270,7 +293,7 @@ void * map_file(s8 const * const restrict filename, u64 * const restrict filesiz
     *filesize = 0;
     void * p = 0;
 
-    si fd = open(filename, O_RDONLY | O_BINARY);
+    const si fd = open(filename, O_RDONLY | O_BINARY);
 
     if (fd >= 0)
     {
