@@ -180,10 +180,10 @@ si main(si argc, s8 ** argv)
     s8 dtbuf[64];
     o("%s > tinypage v1.0\n", datetime(dtbuf));
 
-    if (argc != 4)
+    if (argc != 3)
     {
-        o("%s <local bind ip> <local port> <packet count start#>\n", argv[0]);
-        o("example: %s 127.0.0.1 80 1000 &>> httpout.txt\n", argv[0]);
+        o("%s <local bind ip> <local port>\n", argv[0]);
+        o("example: %s 127.0.0.1 80 > httpout.txt\n", argv[0]);
         return EXIT_FAILURE;
     }
 
