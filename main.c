@@ -90,11 +90,12 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
         socklen_t socklen = sizeof(struct sockaddr_in);
 
         errno = 0;
-        si client_sock = accept(sock, (struct sockaddr*)addr, &socklen);
+        const si client_sock = accept(sock, (void *)addr, &socklen);
+        s8 const * const ip = inet_ntoa(addr->sin_addr);
 
         if (errno || client_sock == -1)
         {
-            o("%s > accept error: %d (%s)\n", datetime(dtbuf), errno, inet_ntoa(addr->sin_addr));
+            o("%s > accept error: %d (%s)\n", datetime(dtbuf), errno, ip);
             continue;
         }
 
@@ -103,7 +104,7 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 
         if (errno || pid == -1)
         {
-            o("%s > fork error: %d\n", datetime(dtbuf), errno);
+            o("%s > fork error: %d (%s)\n", datetime(dtbuf), errno, ip);
             close(client_sock);
             continue;
         }
@@ -112,7 +113,7 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
         {
             close(sock);
 
-            o("%s > client with IP %s connected\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
+            o("%s > client with IP %s connected\n", datetime(dtbuf), ip);
 
             memset(buf, 0, 16);
 
@@ -123,20 +124,20 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
             {
                 if (errno == EAGAIN || errno == EWOULDBLOCK)
                 {
-                    o("%s > recv timeout: %s\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
+                    o("%s > recv timeout: %s\n", datetime(dtbuf), ip);
                 }
                 else
                 {
-                    o("%s > recv error: %d (%s)\n", datetime(dtbuf), errno, inet_ntoa(addr->sin_addr));
+                    o("%s > recv error: %d (%s)\n", datetime(dtbuf), errno, ip);
                 }
             }
             else if (!len)
             {
-                o("%s > orderly close: %s\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
+                o("%s > orderly close: %s\n", datetime(dtbuf), ip);
             }
             else
             {
-                o("%s > recv %zu bytes from %s\n", datetime(dtbuf), len, inet_ntoa(addr->sin_addr));
+                o("%s > recv %zu bytes from %s\n", datetime(dtbuf), len, ip);
 
                 if (ENABLE_OUTPUT)
                 {
@@ -146,22 +147,22 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
 
                 if ((!strncasecmp(buf, "get ", 4) && strncasecmp(buf, "get /favicon.ico", 16)) || !strncasecmp(buf, "post ", 5) || !strncasecmp(buf, "head ", 5))
                 {
-                    o("valid request from %s\n", inet_ntoa(addr->sin_addr));
+                    o("valid request from %s\n", ip);
 
                     errno = 0;
                     ssize_t sent = send(client_sock, packet, packet_size, 0);
 
                     if (errno || sent == -1)
                     {
-                        o("%s > send error: %d (%s)\n", datetime(dtbuf), errno, inet_ntoa(addr->sin_addr));
+                        o("%s > send error: %d (%s)\n", datetime(dtbuf), errno, ip);
                     }
                     else if (sent == packet_size)
                     {
-                        o("sent %zu bytes to %s\n", sent, inet_ntoa(addr->sin_addr));
+                        o("sent %zu bytes to %s\n", sent, ip);
                     }
                     else
                     {
-                        o("%s > unkown send error: %s\n", datetime(dtbuf), inet_ntoa(addr->sin_addr));
+                        o("%s > unkown send error: %s\n", datetime(dtbuf), ip);
                     }
                 }
             }
@@ -240,7 +241,7 @@ si main(si argc, s8 ** argv)
     #undef options
 
     errno = 0;
-    si res = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
+    si res = bind(sock, (void *)&addr, sizeof(addr));
 
     if (errno || res == -1)
     {
