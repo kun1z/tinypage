@@ -10,6 +10,7 @@ typedef   uint32_t        u32    ;   typedef   int32_t      s32    ;
 typedef   uint64_t        u64    ;   typedef   int64_t      s64    ;
 typedef   __uint128_t     u128   ;   typedef   __int128_t   s128   ;
 typedef   unsigned int    ui     ;   typedef   int          si     ;
+typedef   unsigned long   ul     ;   typedef   long         sl     ;
 typedef   float           r32    ;   typedef   double       r64    ;
 //----------------------------------------------------------------------------------------------------------------------
 #include <errno.h>
@@ -37,10 +38,9 @@ sem_t csoutput;                                                    // critical s
 //----------------------------------------------------------------------------------------------------------------------
 void pump(struct sockaddr_in * const restrict addr, const si sock)
 {
-    errno = 0;
     s8 * const restrict buf = malloc(BUFSIZE);
 
-    if (errno || !buf)
+    if (!buf)
     {
         o("memory could not be allocated\n");
         exit(EXIT_FAILURE);
@@ -63,10 +63,9 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
     const u64 header_length = sprintf(buf, "HTTP/1.1 200 OK\nServer: tinypage/1.0\nContent-Length: %"PRIu64"\nConnection: close\nContent-Type: text/html; charset=us-ascii\n\n", filesize);
     const u64 packet_size = header_length + filesize;
 
-    errno = 0;
     s8 * const restrict packet = malloc(packet_size);
 
-    if (errno || !packet)
+    if (!packet)
     {
         o("memory could not be allocated\n");
         exit(EXIT_FAILURE);
@@ -75,10 +74,9 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
     memcpy(packet, buf, header_length);
     memcpy(&packet[header_length], webpage, filesize);
 
-    errno = 0;
     const si res = munmap(webpage, filesize);
 
-    if (errno || res == -1)
+    if (res == -1)
     {
         o("memory could not be unmapped\n");
         exit(EXIT_FAILURE);
@@ -93,91 +91,95 @@ void pump(struct sockaddr_in * const restrict addr, const si sock)
         socklen_t socklen = sizeof(struct sockaddr_in);
         const si client_sock = accept(sock, (void *)addr, &socklen);
 
-        s8 const * const restrict ip = inet_ntoa(addr->sin_addr);
-
-        if (!ip || strnlen(ip, 16) == 16)
+        if (client_sock == -1)
         {
-            o("%s > inet_ntoa() failed\n", datetime(dtbuf));
-            exit(EXIT_FAILURE);
+            o("%s > accept error: %d\n", datetime(dtbuf), errno);
         }
-
-        if (errno || client_sock == -1)
+        else
         {
-            o("%s > accept error: %d (%s)\n", datetime(dtbuf), errno, ip);
-            continue;
-        }
-
-        errno = 0;
-        pid_t pid = fork();
-
-        if (errno || pid == -1)
-        {
-            o("%s > fork error: %d (%s)\n", datetime(dtbuf), errno, ip);
-        }
-        else if (!pid) // child
-        {
-            close(sock);
-
-            o("%s > client with IP %s connected\n", datetime(dtbuf), ip);
-
-            memset(buf, 0, 16);
-
             errno = 0;
-            const ssize_t len = recv(client_sock, buf, BUFSIZE, 0);
+            pid_t pid = fork();
 
-            if (errno || len == -1)
+            if (pid == -1) // error
             {
-                if (errno == EAGAIN || errno == EWOULDBLOCK)
-                {
-                    o("%s > recv timeout: %s\n", datetime(dtbuf), ip);
-                }
-                else
-                {
-                    o("%s > recv error: %d (%s)\n", datetime(dtbuf), errno, ip);
-                }
+                o("%s > fork error: %d\n", datetime(dtbuf), errno);
+                close(client_sock);
             }
-            else if (!len)
+            else if (!pid) // child
             {
-                o("%s > orderly close: %s\n", datetime(dtbuf), ip);
-            }
-            else
-            {
-                o("%s > recv %zu bytes from %s\n", datetime(dtbuf), len, ip);
+                close(sock);
 
-                if (ENABLE_OUTPUT)
+                s8 const * const restrict ip = inet_ntoa(addr->sin_addr);
+
+                if (!ip || strnlen(ip, 16) == 16)
                 {
-                    fwrite(buf, 1, len, stdout);
-                    o("\n");
+                    o("%s > inet_ntoa() failed\n", datetime(dtbuf));
+                    exit(EXIT_FAILURE);
                 }
 
-                if ((!strncasecmp(buf, "get ", 4) && strncasecmp(buf, "get /favicon.ico", 16)) || !strncasecmp(buf, "post ", 5) || !strncasecmp(buf, "head ", 5))
+                o("%s > client with IP %s connected\n", datetime(dtbuf), ip);
+
+                memset(buf, 0, 16);
+
+                errno = 0;
+                const ssize_t len = recv(client_sock, buf, BUFSIZE, 0);
+
+                if (len == -1)
                 {
-                    o("valid request from %s\n", ip);
-
-                    errno = 0;
-                    ssize_t sent = send(client_sock, packet, packet_size, 0);
-
-                    if (errno || sent == -1)
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
                     {
-                        o("%s > send error: %d (%s)\n", datetime(dtbuf), errno, ip);
-                    }
-                    else if (sent == packet_size)
-                    {
-                        o("sent %zu bytes to %s\n", sent, ip);
+                        o("%s > recv timeout: %s\n", datetime(dtbuf), ip);
                     }
                     else
                     {
-                        o("%s > unkown send error: %s\n", datetime(dtbuf), ip);
+                        o("%s > recv error: %d (%s)\n", datetime(dtbuf), errno, ip);
                     }
                 }
+                else if (!len)
+                {
+                    o("%s > orderly close: %s\n", datetime(dtbuf), ip);
+                }
+                else
+                {
+                    o("%s > recv %zu bytes from %s\n", datetime(dtbuf), len, ip);
+
+                    if (ENABLE_OUTPUT)
+                    {
+                        fwrite(buf, 1, len, stdout);
+                        o("\n");
+                    }
+
+                    if ((!strncasecmp(buf, "get ", 4) && strncasecmp(buf, "get /favicon.ico", 16)) || !strncasecmp(buf, "post ", 5) || !strncasecmp(buf, "head ", 5))
+                    {
+                        o("valid request from %s\n", ip);
+
+                        errno = 0;
+                        ssize_t sent = send(client_sock, packet, packet_size, 0);
+
+                        if (sent == -1)
+                        {
+                            o("%s > send error: %d (%s)\n", datetime(dtbuf), errno, ip);
+                        }
+                        else if (sent == packet_size)
+                        {
+                            o("sent %zu bytes to %s\n", sent, ip);
+                        }
+                        else
+                        {
+                            o("%s > unkown send error: %s\n", datetime(dtbuf), ip);
+                        }
+                    }
+                }
+
+                close(client_sock);
+
+                exit(EXIT_SUCCESS);
             }
-
-            close(client_sock);
-
-            exit(EXIT_SUCCESS);
+            else // parent
+            {
+                close(client_sock);
+            }
         }
-
-        close(client_sock);
     }
 }
 //----------------------------------------------------------------------------------------------------------------------
@@ -186,9 +188,9 @@ si main(si argc, s8 ** argv)
     errno = 0;
     si res = sem_init(&csoutput, 1, 1);
 
-    if (errno || res == -1)
+    if (res == -1)
     {
-        printf("sem_init() failed: %d\n", errno);
+        perror("sem_init error");
         return EXIT_FAILURE;
     }
 
@@ -211,9 +213,9 @@ si main(si argc, s8 ** argv)
     errno = 0;
     const si sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    if (errno || sock == -1)
+    if (sock == -1)
     {
-        o("socket error: %d\n", errno);
+        perror("socket error");
         return EXIT_FAILURE;
     }
 
@@ -222,8 +224,8 @@ si main(si argc, s8 ** argv)
     // socket & TCP options: You may want to change them!
 
     const si off = 0, on = 1;
-    const struct linger li = { 1, 15 }; // linger on close enabled, 15 seconds before timeout
-    const struct timeval tv = { 15, 0 }; // send/recv 15 second timeout
+    const struct linger li =  {  1, 15 }; // linger on close enabled, 15 seconds before timeout
+    const struct timeval tv = { 15,  0 }; // send/recv 15 second timeout
 
     // Pack all of our options into structured arrays so we can loop over them:
 
@@ -245,9 +247,9 @@ si main(si argc, s8 ** argv)
         errno = 0;
         res = setsockopt(sock, p[i][0], p[i][1], v[i], p[i][2]);
 
-        if (errno || res == -1)
+        if (res == -1)
         {
-            o("setsockopt error: %d\n", errno);
+            perror("setsockopt error");
             return EXIT_FAILURE;
         }
     }
@@ -257,9 +259,9 @@ si main(si argc, s8 ** argv)
     errno = 0;
     res = bind(sock, (void *)&addr, sizeof(struct sockaddr_in));
 
-    if (errno || res == -1)
+    if (res == -1)
     {
-        o("bind error: %d", errno);
+        perror("bind error");
         return EXIT_FAILURE;
     }
 
@@ -268,9 +270,9 @@ si main(si argc, s8 ** argv)
     errno = 0;
     res = listen(sock, MAX_LISTEN);
 
-    if (errno || res == -1)
+    if (res == -1)
     {
-        o("listen error: %d\n", errno);
+        perror("listen error");
         return EXIT_FAILURE;
     }
 
@@ -288,10 +290,10 @@ void o(s8 const * const restrict format, ... )
         errno = 0;
         si res = sem_wait(&csoutput);
 
-        if (errno || res == -1)
+        if (res == -1)
         {
-            printf("sem_wait() failed: %d\n", errno);
-            exit(EXIT_SUCCESS);
+            perror("sem_wait error");
+            exit(EXIT_FAILURE);
         }
 
         va_list t;
@@ -301,8 +303,8 @@ void o(s8 const * const restrict format, ... )
 
         if (res < 0)
         {
-            printf("vprintf() failed\n");
-            exit(EXIT_SUCCESS);
+            fputs("vprintf error\n", stderr);
+            exit(EXIT_FAILURE);
         }
 
         fflush(stdout);
@@ -310,10 +312,10 @@ void o(s8 const * const restrict format, ... )
         errno = 0;
         res = sem_post(&csoutput);
 
-        if (errno || res == -1)
+        if (res == -1)
         {
-            printf("sem_post() failed: %d\n", errno);
-            exit(EXIT_SUCCESS);
+            perror("sem_post error");
+            exit(EXIT_FAILURE);
         }
     }
 }
@@ -325,22 +327,22 @@ s8 * datetime(s8 * const restrict buf)
     errno = 0;
     const time_t t = time(0);
 
-    if (errno || t == (time_t)-1)
+    if (t == -1)
     {
-        printf("time() failed: %d\n", errno);
-        exit(EXIT_SUCCESS);
+        perror("time error");
+        exit(EXIT_FAILURE);
     }
 
     if (localtime_r(&t, &l) != &l)
     {
-        printf("localtime_r() failed\n");
-        exit(EXIT_SUCCESS);
+        fputs("localtime_r error\n", stderr);
+        exit(EXIT_FAILURE);
     }
 
     if (asctime_r(&l, buf) != buf)
     {
-        printf("asctime_r() failed\n");
-        exit(EXIT_SUCCESS);
+        fputs("asctime_r error\n", stderr);
+        exit(EXIT_FAILURE);
     }
 
     buf[strlen(buf) - 1] = 0;
@@ -353,24 +355,20 @@ void * map_file(s8 const * const restrict filename, u64 * const restrict filesiz
     *filesize = 0;
     void * p = 0;
 
-    errno = 0;
     const si fd = open(filename, O_RDONLY | O_BINARY);
 
-    if (!errno && fd >= 0)
+    if (fd >= 0)
     {
         struct stat s;
-
-        errno = 0;
         const si res = fstat(fd, &s);
 
-        if (!errno && !res)
+        if (!res)
         {
             const u64 file_size = s.st_size;
 
-            errno = 0;
             p = mmap(0, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
 
-            if (errno || p == MAP_FAILED)
+            if (p == MAP_FAILED)
             {
                 p = 0;
             }
